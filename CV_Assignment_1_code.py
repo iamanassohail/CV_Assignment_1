@@ -96,7 +96,7 @@ def random_test_runs(image_path, num_tests=5):
 # --- Example run ---
 if __name__ == '__main__':
     # Load an image
-    image_path = 'D:\Desktop\Sample_Image.png'  # Replace with your image path
+    image_path = 'D:\Desktop\Sample_Image.png'
 
     # Example source and destination points
     src_pts = [(50, 50), (200, 50), (50, 200)]
