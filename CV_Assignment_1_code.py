@@ -1,107 +1,111 @@
-import cv2
+import cv2 as cv
 import numpy as np
 import random
 
-def compute_affine_matrix(src_pts, dst_pts):
-    # Compute a 3x3 affine transformation matrix from 3 source and 3 destination points.
-    # src_pts and dst_pts are 3x2 numpy arrays.
-    assert src_pts.shape == (3, 2)
-    assert dst_pts.shape == (3, 2)
+def get_pixel_value(input_pixel, pos):
+    """
+    Returns the pixel value at a given position (sx, sy) in the image with bounds checking.
+    """
+    output_pixel = 0
+    pos = np.round(pos)  # Round position to nearest integer
+    if ((pos[0] < np.size(input_pixel, 0)) and (pos[0] >= 0) and
+        (pos[1] < np.size(input_pixel, 1)) and (pos[1] >= 0)):
+        output_pixel = input_pixel[int(pos[0]), int(pos[1])]  # Get pixel value if within bounds
+    return output_pixel
 
+def random_points(img_shape):
+    """
+    Generate 3 random non-colinear source and destination point pairs.
+    """
+    h, w = img_shape[:2]
+    while True:
+        src_pts = np.array([[random.randint(0, w-1), random.randint(0, h-1)] for _ in range(3)])
+        if np.linalg.matrix_rank(np.hstack([src_pts, np.ones((3,1))])) == 3:
+            break
+
+    dst_pts = np.array([[random.randint(0, w-1), random.randint(0, h-1)] for _ in range(3)])
+    return src_pts, dst_pts
+
+def get_affine_matrix(src_pts, dst_pts):
+    """
+    Compute 2D affine transformation matrix using 3 points.
+    """
     A = []
-    b = []
-
-    for i in range(3):
-        x, y = src_pts[i]
-        u, v = dst_pts[i]
+    B = []
+    for (x, y), (xp, yp) in zip(src_pts, dst_pts):
         A.append([x, y, 1, 0, 0, 0])
         A.append([0, 0, 0, x, y, 1])
-        b.append(u)
-        b.append(v)
-
+        B.append(xp)
+        B.append(yp)
+    
     A = np.array(A)
-    b = np.array(b)
+    B = np.array(B)
 
-    # Solve for affine params
-    affine_params = np.linalg.solve(A, b)
+    # Solve for affine parameters
+    params, _, _, _ = np.linalg.lstsq(A, B, rcond=None)
 
-    # Build full 3x3 matrix in homogeneous coordinates
-    affine_matrix = np.array([
-        [affine_params[0], affine_params[1], affine_params[2]],
-        [affine_params[3], affine_params[4], affine_params[5]],
-        [0, 0, 1]
-    ])
+    # Reshape into 2x3 affine matrix
+    M = params.reshape(2, 3)
+    return M
 
-    return affine_matrix
+def apply_affine_transform(image, M, output_size):
+    """
+    Apply affine transformation to image.
+    """
+    h_out, w_out = output_size
+    transformed = np.zeros((h_out, w_out, 3), dtype=np.uint8)
 
-def warp_image(img, affine_matrix, output_shape):
-    # Apply an affine transformation to an image using numpy.
-    # Only numpy allowed for transformation computation.
-    h_out, w_out = output_shape
-    result = np.zeros((h_out, w_out, img.shape[2]), dtype=img.dtype)
+    # Inverse matrix to map destination to source
+    M_hom = np.vstack([M, [0, 0, 1]])  
+    M_inv = np.linalg.inv(M_hom)
 
-    inv_matrix = np.linalg.inv(affine_matrix)
+    for y in range(h_out):
+        for x in range(w_out):
+            new_coord = np.matmul(M_inv,np.array([x, y, 1]))
+            new_coord = new_coord / new_coord[2]
+            sx, sy = new_coord[:2]
+            transformed[y, x] = get_pixel_value(image, [sx, sy])
+    
+    return transformed
 
-    for y_out in range(h_out):
-        for x_out in range(w_out):
-            out_coord = np.array([x_out, y_out, 1])
-            src_coord = inv_matrix @ out_coord
-            x_src, y_src = src_coord[:2]
-
-            if 0 <= x_src < img.shape[1] and 0 <= y_src < img.shape[0]:
-                # Nearest neighbor sampling
-                x_nn = min(max(int(round(x_src)), 0), img.shape[1] - 1)
-                y_nn = min(max(int(round(y_src)), 0), img.shape[0] - 1)
-                result[y_out, x_out] = img[y_nn, x_nn]
-
-
-    return result
-
-def draw_points(img, points, color, radius=5):
+def annotate_points(image, points, color, offset=(0, 0)):
+    """
+    Annotate points with text showing their coordinates.
+    """
     for (x, y) in points:
-        cv2.circle(img, (int(x), int(y)), radius, color, -1)
-
-def run_example(image_path, src_pts, dst_pts, output_file='result.png'):
-    img = cv2.imread(image_path)
-    h, w = img.shape[:2]
-
-    # Compute affine transformation matrix
-    affine_matrix = compute_affine_matrix(np.array(src_pts), np.array(dst_pts))
-
-    # Warp the image using the affine transformation
-    warped_img = warp_image(img, affine_matrix, (h, w))
-
-    # Draw the source and destination points
-    img_annotated = img.copy()
-    warped_annotated = warped_img.copy()
-    draw_points(img_annotated, src_pts, (0, 255, 0))  # Green
-    draw_points(warped_annotated, dst_pts, (0, 0, 255))  # Red
-
-    # Combine images side by side
-    combined = np.hstack((img_annotated, warped_annotated))
-
-    # Save result
-    cv2.imwrite(output_file, combined)
-    print(f"Result saved to {output_file}")
-
-def random_test_runs(image_path, num_tests=5):
-    img = cv2.imread(image_path)
-    h, w = img.shape[:2]
-
-    for i in range(num_tests):
-        src_pts = [(random.randint(0, w - 1), random.randint(0, h - 1)) for _ in range(3)]
-        dst_pts = [(random.randint(0, w - 1), random.randint(0, h - 1)) for _ in range(3)]
-        run_example(image_path, src_pts, dst_pts, output_file=f'result_{i}.png')
-
-# --- Example run ---
+        text = f"({int(x)}, {int(y)})"
+        # Draw the point and annotate it
+        cv.putText(image, text, (int(x) + offset[0], int(y) + offset[1]), 
+                    cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv.LINE_AA)
+        
 if __name__ == '__main__':
-    # Load an image
-    image_path = 'D:\Desktop\Sample_Image.png'
+    
+    image = cv.imread('trail.jpg')  
+    if image is None:
+        print("Image not found.")
+    
 
-    # Example source and destination points
-    src_pts = [(50, 50), (200, 50), (50, 200)]
-    dst_pts = [(70, 70), (220, 60), (80, 220)]
+    h, w = image.shape[:2]
+    # Generate stable random source and destination points
+    src_pts, dst_pts = random_points(image.shape)
+    """
+    #manual src_pts, dst_pts 
+    src_pts = (100,900),(200,50),(500,10)
+    dst_pts = (500,250),(802,40),(2000,650)
+    """
+    # Compute affine matrix
+    M = get_affine_matrix(src_pts, dst_pts)
+    
+    # Apply transformation
+    transformed_img = apply_affine_transform(image, M, (h, w))
+    
+    combined = np.hstack((image, transformed_img))
+    
+    # Annotate points
+    annotate_points(combined, src_pts, (0, 0, 255))  # Red on original
+    annotate_points(combined, dst_pts, (0, 255, 0), offset=(w, 0))  # Green on transformed
 
-    # run_example(image_path, src_pts, dst_pts)
-    # Optional: run random tests
-    random_test_runs(image_path)
+    resized_img = cv.resize(combined, (1920, 1080), interpolation=cv.INTER_AREA)
+    cv.imshow('Affine Transformation', resized_img)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
