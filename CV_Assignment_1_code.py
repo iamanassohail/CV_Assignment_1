@@ -55,13 +55,12 @@ def apply_affine_transform(image, M, output_size):
     h_out, w_out = output_size
     transformed = np.zeros((h_out, w_out, 3), dtype=np.uint8)
 
-    # Inverse matrix to map destination to source
+    #Applying homogenous coordinates
     M_hom = np.vstack([M, [0, 0, 1]])  
-    M_inv = np.linalg.inv(M_hom)
 
     for y in range(h_out):
         for x in range(w_out):
-            new_coord = np.matmul(M_inv,np.array([x, y, 1]))
+            new_coord = np.matmul(M_hom,np.array([x, y, 1]))
             new_coord = new_coord / new_coord[2]
             sx, sy = new_coord[:2]
             transformed[y, x] = get_pixel_value(image, [sx, sy])
@@ -74,25 +73,29 @@ def annotate_points(image, points, color, offset=(0, 0)):
     """
     for (x, y) in points:
         text = f"({int(x)}, {int(y)})"
+        cv.circle(image, (int(x) + offset[0], int(y) + offset[1]), 1, color, 3)
         # Draw the point and annotate it
         cv.putText(image, text, (int(x) + offset[0], int(y) + offset[1]), 
-                    cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv.LINE_AA)
+                    cv.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv.LINE_AA)
         
 if __name__ == '__main__':
     
     image = cv.imread('trail.jpg')  
     if image is None:
         print("Image not found.")
+        exit()
     
-
     h, w = image.shape[:2]
     # Generate stable random source and destination points
     src_pts, dst_pts = random_points(image.shape)
-    """
+    
     #manual src_pts, dst_pts 
-    src_pts = (100,900),(200,50),(500,10)
-    dst_pts = (500,250),(802,40),(2000,650)
-    """
+    #dst_pts = (500,250),(802,1000),(100,650)
+    #src_pts = (100,900),(500,50),(800,1000)
+    #if np.linalg.matrix_rank(np.hstack([src_pts, np.ones((3,1))])) != 3:
+        #print("Source points are collinear.")
+        #exit()
+
     # Compute affine matrix
     M = get_affine_matrix(src_pts, dst_pts)
     
@@ -105,7 +108,9 @@ if __name__ == '__main__':
     annotate_points(combined, src_pts, (0, 0, 255))  # Red on original
     annotate_points(combined, dst_pts, (0, 255, 0), offset=(w, 0))  # Green on transformed
 
+    #Results
     resized_img = cv.resize(combined, (1920, 1080), interpolation=cv.INTER_AREA)
     cv.imshow('Affine Transformation', resized_img)
+    cv.imwrite('output_image.jpg', resized_img)
     cv.waitKey(0)
     cv.destroyAllWindows()
